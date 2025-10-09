@@ -1,7 +1,7 @@
 seed = 42
 import sys
 
-sys.path.append("/srv/user/turishcheva/sensorium_replicate/sensorium_2023/")
+# sys.path.append("/srv/user/turishcheva/sensorium_replicate/sensorium_2023/")
 from functools import partial
 
 import numpy as np
@@ -17,43 +17,42 @@ set_random_seed(seed)
 import os
 
 import wandb
+from eval import eval_model
+from moments import load_mean_variance
 from neuralpredictors.layers.cores.conv2d import Stacked2dCore
-from neuralpredictors.layers.encoders.mean_variance_functions import \
-    fitted_zig_mean
+from neuralpredictors.layers.encoders.mean_variance_functions import fitted_zig_mean
 from neuralpredictors.layers.encoders.zero_inflation_encoders import ZIGEncoder
 from neuralpredictors.measures import modules, zero_inflated_losses
 from neuralpredictors.training import early_stopping
 from nnfabrik.utility.nn_helpers import set_random_seed
-from tqdm import tqdm
-
-from eval import eval_model
-from moments import load_mean_variance
 from sensorium.datasets.mouse_video_loaders import mouse_video_loader
 from sensorium.models.make_model import make_video_model
 from sensorium.utility import scores
+from tqdm import tqdm
+
 device = "cuda" if torch.cuda.is_available() else "cpu"
 print(device)
 from sensorium.utility.scores import get_correlations
-
-from experanto.dataloaders import get_multisession_dataloader
-from experanto.configs import DEFAULT_CONFIG as cfg
 from tqdm import tqdm
 
-pre_path_tr = '/mnt/vast-react/projects/neural_foundation_model/upsampling_without_hamming_30.0Hz/'
-pre_path_test = '/mnt/vast-react/projects/neural_foundation_model/test_upsampling_without_hamming_30.0Hz/'
+from experanto.configs import DEFAULT_CONFIG as cfg
+from experanto.dataloaders import get_multisession_dataloader
+
+pre_path_tr = "/mnt/vast-react/projects/neural_foundation_model/upsampling_without_hamming_30.0Hz/"
+pre_path_test = "/mnt/vast-react/projects/neural_foundation_model/test_upsampling_without_hamming_30.0Hz/"
 
 train = [
-    'dynamic29156-11-10-Video-021a75e56847d574b9acbcc06c675055_30hz', 
-    'dynamic29228-2-10-Video-021a75e56847d574b9acbcc06c675055_30hz', 
-    'dynamic29234-6-9-Video-021a75e56847d574b9acbcc06c675055_30hz', 
-    'dynamic29513-3-5-Video-021a75e56847d574b9acbcc06c675055_30hz', 
-    'dynamic29514-2-9-Video-021a75e56847d574b9acbcc06c675055_30hz',
-    'dynamic17797-8-5-Video-021a75e56847d574b9acbcc06c675055_30hz',
+    "dynamic29156-11-10-Video-021a75e56847d574b9acbcc06c675055_30hz",
+    "dynamic29228-2-10-Video-021a75e56847d574b9acbcc06c675055_30hz",
+    "dynamic29234-6-9-Video-021a75e56847d574b9acbcc06c675055_30hz",
+    "dynamic29513-3-5-Video-021a75e56847d574b9acbcc06c675055_30hz",
+    "dynamic29514-2-9-Video-021a75e56847d574b9acbcc06c675055_30hz",
+    "dynamic17797-8-5-Video-021a75e56847d574b9acbcc06c675055_30hz",
 ]
 
 test_folder_scans = [
-    'dynamic26872-17-20-Video-021a75e56847d574b9acbcc06c675055_30hz',
-    'dynamic27204-5-13-Video-021a75e56847d574b9acbcc06c675055_30hz',
+    "dynamic26872-17-20-Video-021a75e56847d574b9acbcc06c675055_30hz",
+    "dynamic27204-5-13-Video-021a75e56847d574b9acbcc06c675055_30hz",
     # 'dynamic29515-10-12-Video-021a75e56847d574b9acbcc06c675055_30hz',
     # 'dynamic29623-4-9-Video-021a75e56847d574b9acbcc06c675055_30hz',
     # 'dynamic29647-19-8-Video-021a75e56847d574b9acbcc06c675055_30hz',
@@ -89,7 +88,6 @@ shifter_dict = dict(
     input_channels_shifter=2,
     hidden_channels_shifter=5,
 )
-
 
 
 def kl_divergence_gaussian(mu, sigma):
@@ -137,6 +135,7 @@ def calculate_ema(data, alpha):
 
     return ema
 
+
 def standard_trainer(
     model,
     dataloaders,
@@ -162,7 +161,7 @@ def standard_trainer(
     cb=None,
     detach_core=False,
     use_wandb=True,
-    wandb_project='finn_mode_with_experanto',
+    wandb_project="finn_mode_with_experanto",
     wandb_entity="ecker-lab",
     wandb_name=None,
     wandb_model_config=None,
@@ -217,7 +216,10 @@ def standard_trainer(
     def full_objective(model, dataloader, data_key, *args, k_regu=k_reg, **kwargs):
         if isinstance(dataloader, dict):
             loss_scale = (
-                np.sqrt(len(dataloader[data_key].loaders[data_key].dataset) / args[0].shape[0])
+                np.sqrt(
+                    len(dataloader[data_key].loaders[data_key].dataset)
+                    / args[0].shape[0]
+                )
                 if scale_loss
                 else 1.0
             )
@@ -441,8 +443,8 @@ def standard_trainer(
         wandb.define_metric(name="Batch", hidden=True)
         wandb.define_metric(name="Epoch - batched", hidden=True)
         wandb.define_metric(name="Batch - batched", hidden=True)
-        
-    print('wandb initialized')
+
+    print("wandb initialized")
 
     batch_no_tot = 0
     ema_values = []
@@ -477,23 +479,31 @@ def standard_trainer(
         ):
             batch_no_tot += 1
             # TODO - polly, these two lines are basically the ones you want to change!
-            beh = torch.cat([batch['eye_tracker'][:, :, :2].transpose(2, 1), batch['treadmill'][:, :, :2].transpose(2, 1)], axis=1)
-            video = batch['screen']
+            beh = torch.cat(
+                [
+                    batch["eye_tracker"][:, :, :2].transpose(2, 1),
+                    batch["treadmill"][:, :, :2].transpose(2, 1),
+                ],
+                axis=1,
+            )
+            video = batch["screen"]
             b_expanded = beh.unsqueeze(-1).unsqueeze(-1)  # or b[:, :, :, None, None]
             # Now broadcast b to match the spatial dimensions [16, 3, 60, 144, 256]
             beh_tiled = b_expanded.expand(-1, -1, -1, video.shape[3], video.shape[4])
             # Concatenate along dim=1 to get [16, 4, 60, 144, 256]
-            video = torch.cat([video, beh_tiled], dim=1).to('cuda:0')
+            video = torch.cat([video, beh_tiled], dim=1).to("cuda:0")
 
-            resp = batch['responses'].transpose(2, 1).to('cuda:0')
-            
+            resp = batch["responses"].transpose(2, 1).to("cuda:0")
+
             batch_kwargs = {
-                'videos': video,
+                "videos": video,
                 # 'pupil_center_core': batch['eye_tracker'][:, :, 2:].transpose(2, 1).to('cuda:0'),
-                'responses': resp,
-                'pupil_center': batch['eye_tracker'][:, :, 2:].transpose(2, 1).to('cuda:0')
+                "responses": resp,
+                "pupil_center": batch["eye_tracker"][:, :, 2:]
+                .transpose(2, 1)
+                .to("cuda:0"),
             }
-            batch_args = [video, resp, batch_kwargs['pupil_center']  ]
+            batch_args = [video, resp, batch_kwargs["pupil_center"]]
             # batch_args = list(data)
             # batch_kwargs = data._asdict() if not isinstance(data, dict) else data
             # -----
@@ -512,7 +522,7 @@ def standard_trainer(
                 optimizer.zero_grad(set_to_none=True)
             if (batch_no + 1) % log_every_n_batch == 0 and use_wandb:
                 wandb_dict = {
-                    "Epoch Train loss- batched" : epoch_loss,
+                    "Epoch Train loss- batched": epoch_loss,
                     "Batch - batched": batch_no_tot,
                     "Epoch - batched": epoch,
                     "Learning rate - batched": optimizer.param_groups[0]["lr"],
@@ -625,34 +635,48 @@ def standard_trainer(
 
 if __name__ == "__main__":
 
-    full_paths = [f'{pre_path_tr}{t}/' for t in train] + [f'{pre_path_test}{t}/' for t in test_folder_scans]
+    full_paths = [f"{pre_path_tr}{t}/" for t in train] + [
+        f"{pre_path_test}{t}/" for t in test_folder_scans
+    ]
 
-    cfg['dataset']['modality_config']['responses']['sampling_rate'] = 30
-    cfg['dataset']['modality_config']['responses']['chunk_size'] = 80
+    cfg["dataset"]["modality_config"]["responses"]["sampling_rate"] = 30
+    cfg["dataset"]["modality_config"]["responses"]["chunk_size"] = 80
 
-    cfg['dataset']['modality_config']['eye_tracker']['sampling_rate'] = 30
-    cfg['dataset']['modality_config']['eye_tracker']['chunk_size'] = 80
+    cfg["dataset"]["modality_config"]["eye_tracker"]["sampling_rate"] = 30
+    cfg["dataset"]["modality_config"]["eye_tracker"]["chunk_size"] = 80
 
-    cfg['dataset']['modality_config']['treadmill']['sampling_rate'] = 30
-    cfg['dataset']['modality_config']['treadmill']['chunk_size'] = 80
+    cfg["dataset"]["modality_config"]["treadmill"]["sampling_rate"] = 30
+    cfg["dataset"]["modality_config"]["treadmill"]["chunk_size"] = 80
 
-    cfg['dataset']['modality_config']['screen']['sampling_rate'] = 30
-    cfg['dataset']['modality_config']['screen']['chunk_size'] =  80
+    cfg["dataset"]["modality_config"]["screen"]["sampling_rate"] = 30
+    cfg["dataset"]["modality_config"]["screen"]["chunk_size"] = 80
 
-    cfg['dataset']['modality_config']['screen']['transforms']['normalization'] = {'mean': 113, 'std': 59}
-    
-    cfg['dataloader']['batch_size'] = 8 
+    cfg["dataset"]["modality_config"]["screen"]["transforms"]["normalization"] = {
+        "mean": 113,
+        "std": 59,
+    }
+
+    cfg["dataloader"]["batch_size"] = 8
 
     for k in cfg.dataset.modality_config.keys():
-        print(k, cfg.dataset.modality_config[k].sampling_rate, cfg.dataset.modality_config[k].chunk_size)
+        print(
+            k,
+            cfg.dataset.modality_config[k].sampling_rate,
+            cfg.dataset.modality_config[k].chunk_size,
+        )
 
-    cfg['dataloader']['prefetch_factor'] = 2
-    cfg['dataloader']['num_workers'] = 4
-    cfg['dataloader']['shuffle'] = True
-    cfg['dataloader']['pin_memory'] = False
+    cfg["dataloader"]["prefetch_factor"] = 2
+    cfg["dataloader"]["num_workers"] = 4
+    cfg["dataloader"]["shuffle"] = True
+    cfg["dataloader"]["pin_memory"] = False
     # cfg['dataset']['add_behavior_as_channels'] = True
-    cfg['dataset']['modality_config']['screen']['transforms']['Resize']['size'] = [36, 64]
-    cfg['dataset']['modality_config']['screen']['sample_stride'] = cfg['dataset']['modality_config']['screen']['chunk_size']
+    cfg["dataset"]["modality_config"]["screen"]["transforms"]["Resize"]["size"] = [
+        36,
+        64,
+    ]
+    cfg["dataset"]["modality_config"]["screen"]["sample_stride"] = cfg["dataset"][
+        "modality_config"
+    ]["screen"]["chunk_size"]
     print(f"stride: {cfg['dataset']['modality_config']['screen']['sample_stride']}")
     train_dl = get_multisession_dataloader(full_paths, cfg)
 
@@ -661,8 +685,10 @@ if __name__ == "__main__":
     data_keys = list(train_dl.loaders.keys())
     for k in data_keys:
         batch = next(iter(train_dl.loaders[k]))
-        n_neurons_dict[k] = batch['responses'].shape[-1]
-        mean_activity_dict[k] = batch['responses'].reshape(-1, n_neurons_dict[k]).mean(axis=0)
+        n_neurons_dict[k] = batch["responses"].shape[-1]
+        mean_activity_dict[k] = (
+            batch["responses"].reshape(-1, n_neurons_dict[k]).mean(axis=0)
+        )
 
     # batch_size = batch['responses'].shape
 
@@ -679,7 +705,7 @@ if __name__ == "__main__":
         #     "hidden_features": 30,
         #     "final_tanh": True,
         # },
-        grid_mean_predictor = None,
+        grid_mean_predictor=None,
         share_features=False,
         share_grid=False,
         shared_match_ids=None,
@@ -687,7 +713,7 @@ if __name__ == "__main__":
         zig=False,
         out_channels=1,
         kernel_size=(11, 5),
-        batch_size=cfg['dataloader']['batch_size'],
+        batch_size=cfg["dataloader"]["batch_size"],
         # conv_out = conv_out
     )
 
@@ -707,38 +733,42 @@ if __name__ == "__main__":
         n_neurons_dict=n_neurons_dict,
         mean_activity_dict=mean_activity_dict,
         experanto=True,
-        readout_dim=factorised_3D_core_dict['hidden_channels'][-1]
+        readout_dim=factorised_3D_core_dict["hidden_channels"][-1],
     )
 
     latent = False
 
-    cfg['dataset']['modality_config']['responses']['sampling_rate'] = 30
-    cfg['dataset']['modality_config']['responses']['chunk_size'] = 60
+    cfg["dataset"]["modality_config"]["responses"]["sampling_rate"] = 30
+    cfg["dataset"]["modality_config"]["responses"]["chunk_size"] = 60
 
-    cfg['dataset']['modality_config']['eye_tracker']['sampling_rate'] = 30
-    cfg['dataset']['modality_config']['eye_tracker']['chunk_size'] = 60
+    cfg["dataset"]["modality_config"]["eye_tracker"]["sampling_rate"] = 30
+    cfg["dataset"]["modality_config"]["eye_tracker"]["chunk_size"] = 60
 
-    cfg['dataset']['modality_config']['treadmill']['sampling_rate'] = 30
-    cfg['dataset']['modality_config']['treadmill']['chunk_size'] = 60
+    cfg["dataset"]["modality_config"]["treadmill"]["sampling_rate"] = 30
+    cfg["dataset"]["modality_config"]["treadmill"]["chunk_size"] = 60
 
-    cfg['dataset']['modality_config']['screen']['sampling_rate'] = 30
-    cfg['dataset']['modality_config']['screen']['chunk_size'] =  60 
+    cfg["dataset"]["modality_config"]["screen"]["sampling_rate"] = 30
+    cfg["dataset"]["modality_config"]["screen"]["chunk_size"] = 60
 
     cfg.dataset.modality_config.screen.valid_condition = {"tier": "validation"}
-    cfg['dataset']['modality_config']['screen']['sample_stride'] = cfg['dataset']['modality_config']['screen']['chunk_size']
+    cfg["dataset"]["modality_config"]["screen"]["sample_stride"] = cfg["dataset"][
+        "modality_config"
+    ]["screen"]["chunk_size"]
 
     dataloaders = {}
-    dataloaders['train'] = train_dl
+    dataloaders["train"] = train_dl
     # todo - undo it after the validation set labels are updated
     # dataloaders["oracle"] = val_dl
     dataloaders["oracle"] = {}
     for m in full_paths:
-        dataloaders["oracle"][m.split('dynamic')[-1].split('-Video')[0]] = get_multisession_dataloader([m], cfg)
+        dataloaders["oracle"][m.split("dynamic")[-1].split("-Video")[0]] = (
+            get_multisession_dataloader([m], cfg)
+        )
 
     lr_inint = 5e-3
     min_lr = 1e-5
 
-    factorised_3d_model.to('cuda:0')
+    factorised_3d_model.to("cuda:0")
 
     validation_score = standard_trainer(
         factorised_3d_model,

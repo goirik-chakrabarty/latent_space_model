@@ -324,7 +324,7 @@ dependencies:
     - greenlet==3.0.3
     - h5py==3.11.0
     - humbug==0.3.2
-    - imagecodecs==2024.1.1
+    # - imagecodecs==2024.1.1 # Installed later with conda
     - imagesize==1.4.1
     - isort==5.13.2
     - jmespath==1.0.1
