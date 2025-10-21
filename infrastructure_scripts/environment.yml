@@ -1,4 +1,4 @@
-name: latent_model_finn
+name: finn
 channels:
   - conda-forge
   - defaults
@@ -407,4 +407,3 @@ dependencies:
     - watchdog==4.0.1
     - wrapt==1.16.0
     - yarl==1.9.4
-prefix: /mnt/lustre-grete/usr/u11302/.conda/envs/sensorium_env

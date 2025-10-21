@@ -219,3 +219,6 @@ __marimo__/
 # My files
 .models/*
 neuralpredictors
+wandb/*
+test_training/*
+slurm_files/*
