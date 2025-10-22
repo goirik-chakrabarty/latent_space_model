@@ -503,20 +503,22 @@ def standard_trainer(
     batch_no_tot = 0
     ema_values = []
     best_validation_correlation = 0
+    calculate_val_loss = False
     # train over epochs
-    for epoch, val_obj in early_stopping(
-        model,
-        stop_closure,
-        interval=interval,
-        patience=patience,
-        start=epoch,
-        max_iter=max_iter,
-        maximize=maximize,
-        tolerance=tolerance,
-        restore_best=restore_best,
-        scheduler=scheduler,
-        lr_decay_steps=lr_decay_steps,
-    ):
+    # for epoch, val_obj in early_stopping(
+    #     model,
+    #     stop_closure,
+    #     interval=interval,
+    #     patience=patience,
+    #     start=epoch,
+    #     max_iter=max_iter,
+    #     maximize=maximize,
+    #     tolerance=tolerance,
+    #     restore_best=restore_best,
+    #     scheduler=scheduler,
+    #     lr_decay_steps=lr_decay_steps,
+    # ):
+    for epoch in range(max_iter):
 
         # executes callback function if passed in keyword args
         if cb is not None:
@@ -588,50 +590,51 @@ def standard_trainer(
         lr = optimizer.param_groups[0]["lr"]
         ###
         ## after - epoch-analysis
-
-        validation_correlation = get_correlations(
-            model,
-            dataloaders["oracle"],
-            device=device,
-            as_dict=False,
-            per_neuron=False,
-            deeplake_ds=False,
-            flow=model.flow,
-            cell_coordinates=None,
-        )
-
-        if save_checkpoints:
-            if validation_correlation > best_validation_correlation:
-                torch.save(model.state_dict(), f"{checkpoint_save_path}best.pth")
-                best_validation_correlation = validation_correlation
-
-        if loss_function == "PoissonLoss" or (not model.latent):
-            val_loss, _ = full_objective(
+        if calculate_val_loss:
+            validation_correlation = get_correlations(
                 model,
                 dataloaders["oracle"],
-                data_key,
-                *batch_args,
-                **batch_kwargs,
-                detach_core=detach_core,
+                device=device,
+                as_dict=False,
+                per_neuron=False,
+                deeplake_ds=False,
+                flow=model.flow,
+                cell_coordinates=None,
             )
-        else:
-            val_loss, kl_div = full_objective(
-                model,
-                dataloaders["oracle"],
-                data_key,
-                *batch_args,
-                **batch_kwargs,
-                detach_core=detach_core,
-            )
+
+            if save_checkpoints:
+                if validation_correlation > best_validation_correlation:
+                    torch.save(model.state_dict(), f"{checkpoint_save_path}best.pth")
+                    best_validation_correlation = validation_correlation
+
+            if loss_function == "PoissonLoss" or (not model.latent):
+                val_loss, _ = full_objective(
+                    model,
+                    dataloaders["oracle"],
+                    data_key,
+                    *batch_args,
+                    **batch_kwargs,
+                    detach_core=detach_core,
+                )
+            else:
+                val_loss, kl_div = full_objective(
+                    model,
+                    dataloaders["oracle"],
+                    data_key,
+                    *batch_args,
+                    **batch_kwargs,
+                    detach_core=detach_core,
+                )
 
         # torch.save(
         # model.state_dict(), f"toymodels2/temp_save.pth"
         # )
 
-        print(
-            f"Epoch {epoch}, Batch {batch_no}, Train loss {loss}, Validation loss {val_loss}"
-        )
-        print(f"EPOCH={epoch}  validation_correlation={validation_correlation}")
+        print(f"Epoch {epoch}, Batch {batch_no}, Train loss {loss}")
+        if calculate_val_loss:
+            print(
+                f"EPOCH={epoch}  validation_correlation={validation_correlation} validation_loss={val_loss}"
+            )
 
         ema_values.append(validation_correlation)
         ema = calculate_ema(torch.tensor(ema_values), ema_span)[-1]
@@ -640,12 +643,12 @@ def standard_trainer(
                 "Epoch Train loss": epoch_loss,
                 "Batch": batch_no_tot,
                 "Epoch": epoch,
-                "validation_correlation": validation_correlation,
+                # "validation_correlation": validation_correlation,
                 # "log_det": log_det,
-                "Epoch validation loss": val_loss,
-                "EMA validation loss": ema,
+                # "Epoch validation loss": val_loss,
+                # "EMA validation loss": ema,
                 # "Poisson Loss": pos_loss,
-                "ZIG Loss": val_loss,
+                # "ZIG Loss": val_loss,
                 "Learning rate": lr,
             }
             wandb.log(wandb_dict)
@@ -656,33 +659,36 @@ def standard_trainer(
     model.eval()
     # if save_checkpoints:
     # torch.save(model.state_dict(), f"{checkpoint_save_path}final.pth")
+    if calculate_val_loss:
+        # Compute avg validation and test correlation
+        validation_correlation = get_correlations(
+            model,
+            dataloaders["oracle"],
+            device=device,
+            as_dict=False,
+            per_neuron=False,
+            deeplake_ds=False,
+            flow=model.flow,
+            cell_coordinates=None,
+        )
+        print(f"\n\n FINAL validation_correlation {validation_correlation} \n\n")
 
-    # Compute avg validation and test correlation
-    validation_correlation = get_correlations(
-        model,
-        dataloaders["oracle"],
-        device=device,
-        as_dict=False,
-        per_neuron=False,
-        deeplake_ds=False,
-        flow=model.flow,
-        cell_coordinates=None,
-    )
-    print(f"\n\n FINAL validation_correlation {validation_correlation} \n\n")
+        output = {}
+        output["validation_corr"] = validation_correlation
 
-    output = {}
-    output["validation_corr"] = validation_correlation
-
-    score = np.mean(validation_correlation)
+        score = np.mean(validation_correlation)
     if use_wandb:
         wandb.finish()
 
-    # removing the checkpoints except the last one
-    to_clean = os.listdir(checkpoint_save_path)
-    # to_clean = os.listdir("toymodels")
-    for f2c in to_clean:
-        if "epoch" in f2c:
-            os.remove(os.path.join(checkpoint_save_path, f2c))
+    if epoch == max_iter - 1 or epoch % 10 == 0:
+        torch.save(model.state_dict(), f"{checkpoint_save_path}{epoch}.pth")
+
+    # # removing the checkpoints except the last one
+    # to_clean = os.listdir(checkpoint_save_path)
+    # # to_clean = os.listdir("toymodels")
+    # for f2c in to_clean:
+    #     if "epoch" in f2c:
+    #         os.remove(os.path.join(checkpoint_save_path, f2c))
 
     return score
 
@@ -690,6 +696,9 @@ def standard_trainer(
 if __name__ == "__main__":
 
     # full_paths = session_specific_ids_A.keys()
+    # experiment = session_specific_ids_A
+    experiment = session_specific_ids_B
+    experiment_test = session_specific_ids_test
 
     cfg["dataset"]["modality_config"]["responses"]["sampling_rate"] = 30
     cfg["dataset"]["modality_config"]["responses"]["chunk_size"] = 80
@@ -733,11 +742,11 @@ if __name__ == "__main__":
 
     cfg.dataset.modality_config.treadmill.filters.custom_interval_filter = {
         "__key__": "session_specific_id_filter",
-        "session_ids": session_specific_ids_A,
+        "session_ids": experiment,
     }
     start_time = time()
 
-    train_dl = get_multisession_dataloader(list(session_specific_ids_A.keys()), cfg)
+    train_dl = get_multisession_dataloader(list(experiment.keys()), cfg)
 
     end_time = time()
     print(f"Dataloader creation time: {end_time - start_time} seconds")
@@ -822,13 +831,15 @@ if __name__ == "__main__":
 
     cfg.dataset.modality_config.treadmill.filters.custom_interval_filter = {
         "__key__": "session_specific_id_filter",
-        "session_ids": session_specific_ids_test,
+        "session_ids": experiment_test,
     }
     start_time = time()
 
-    dataloaders["oracle"] = get_multisession_dataloader(
-        list(session_specific_ids_test.keys()), cfg
-    )
+    dataloaders["oracle"] = {}
+    for m in experiment_test.keys():
+        dataloaders["oracle"][m.split("dynamic")[-1].split("-Video")[0]] = (
+            get_multisession_dataloader([m], cfg)
+        )
 
     end_time = time()
     print(f"Dataloader creation time: {end_time - start_time} seconds")
