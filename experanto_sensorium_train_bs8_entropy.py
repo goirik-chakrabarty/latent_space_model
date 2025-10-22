@@ -5,6 +5,7 @@ import sys
 
 # sys.path.append("/srv/user/turishcheva/sensorium_replicate/sensorium_2023/")
 from functools import partial
+from time import time
 
 import numpy as np
 import pandas as pd
@@ -40,7 +41,10 @@ from sensorium.utility.scores import get_correlations
 from tqdm import tqdm
 
 from experanto.configs import DEFAULT_CONFIG as cfg
-from experanto.dataloaders import get_multisession_dataloader
+from experanto.dataloaders import (
+    get_multisession_concat_dataloader,
+    get_multisession_dataloader,
+)
 
 file_path = "optimal_trial_details.json"
 data = None
@@ -83,6 +87,13 @@ session_specific_ids_test_B = {
     os.path.join(pre_path_tr, session): df_B[df_B.session == session].trial_idx.tolist()
     for session in test_folder_scans
 }
+# Combine the lists for the same session in A and B test
+session_specific_ids_test = {}
+for session in test_folder_scans:
+    ids_A = session_specific_ids_test_A.get(os.path.join(pre_path_tr, session), [])
+    ids_B = session_specific_ids_test_B.get(os.path.join(pre_path_tr, session), [])
+    combined_ids = list(set(ids_A + ids_B))
+    session_specific_ids_test[os.path.join(pre_path_tr, session)] = combined_ids
 
 # train = [
 #     "dynamic29156-11-10-Video-021a75e56847d574b9acbcc06c675055_30hz",
@@ -678,7 +689,7 @@ def standard_trainer(
 
 if __name__ == "__main__":
 
-    full_paths = session_specific_ids_A.keys()
+    # full_paths = session_specific_ids_A.keys()
 
     cfg["dataset"]["modality_config"]["responses"]["sampling_rate"] = 30
     cfg["dataset"]["modality_config"]["responses"]["chunk_size"] = 80
@@ -707,7 +718,7 @@ if __name__ == "__main__":
         )
 
     cfg["dataloader"]["prefetch_factor"] = 2
-    cfg["dataloader"]["num_workers"] = 4
+    cfg["dataloader"]["num_workers"] = 1
     cfg["dataloader"]["shuffle"] = True
     cfg["dataloader"]["pin_memory"] = False
     # cfg['dataset']['add_behavior_as_channels'] = True
@@ -724,8 +735,12 @@ if __name__ == "__main__":
         "__key__": "session_specific_id_filter",
         "session_ids": session_specific_ids_A,
     }
+    start_time = time()
 
-    train_dl = get_multisession_dataloader(full_paths, cfg)
+    train_dl = get_multisession_dataloader(list(session_specific_ids_A.keys()), cfg)
+
+    end_time = time()
+    print(f"Dataloader creation time: {end_time - start_time} seconds")
 
     mean_activity_dict = {}
     n_neurons_dict = {}
@@ -797,20 +812,33 @@ if __name__ == "__main__":
     cfg["dataset"]["modality_config"]["screen"]["sampling_rate"] = 30
     cfg["dataset"]["modality_config"]["screen"]["chunk_size"] = 60
 
-    cfg.dataset.modality_config.screen.valid_condition = {"tier": "validation"}
+    # cfg.dataset.modality_config.screen.valid_condition = {"tier": "validation"}
     cfg["dataset"]["modality_config"]["screen"]["sample_stride"] = cfg["dataset"][
         "modality_config"
     ]["screen"]["chunk_size"]
 
     dataloaders = {}
     dataloaders["train"] = train_dl
+
+    cfg.dataset.modality_config.treadmill.filters.custom_interval_filter = {
+        "__key__": "session_specific_id_filter",
+        "session_ids": session_specific_ids_test,
+    }
+    start_time = time()
+
+    dataloaders["oracle"] = get_multisession_dataloader(
+        list(session_specific_ids_test.keys()), cfg
+    )
+
+    end_time = time()
+    print(f"Dataloader creation time: {end_time - start_time} seconds")
     # todo - undo it after the validation set labels are updated
     # dataloaders["oracle"] = val_dl
-    dataloaders["oracle"] = {}
-    for m in full_paths:
-        dataloaders["oracle"][m.split("dynamic")[-1].split("-Video")[0]] = (
-            get_multisession_dataloader([m], cfg)
-        )
+    # dataloaders["oracle"] = {}
+    # for m in full_paths:
+    #     dataloaders["oracle"][m.split("dynamic")[-1].split("-Video")[0]] = (
+    #         get_multisession_dataloader([m], cfg)
+    #     )
 
     lr_inint = 5e-3
     min_lr = 1e-5
