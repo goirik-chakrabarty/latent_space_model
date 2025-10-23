@@ -28,7 +28,6 @@ from neuralpredictors.layers.encoders.mean_variance_functions import fitted_zig_
 from neuralpredictors.layers.encoders.zero_inflation_encoders import ZIGEncoder
 from neuralpredictors.measures import modules, zero_inflated_losses
 from neuralpredictors.training import early_stopping
-from nnfabrik.utility.nn_helpers import set_random_seed
 from sensorium.datasets.mouse_video_loaders import mouse_video_loader
 from sensorium.models.make_model import make_video_model
 from sensorium.utility import scores
@@ -696,8 +695,10 @@ def standard_trainer(
 if __name__ == "__main__":
 
     # full_paths = session_specific_ids_A.keys()
-    # experiment = session_specific_ids_A
-    experiment = session_specific_ids_B
+    experiment = session_specific_ids_A
+    print("A")
+    # experiment = session_specific_ids_B
+    # print("B")
     experiment_test = session_specific_ids_test
 
     cfg["dataset"]["modality_config"]["responses"]["sampling_rate"] = 30
@@ -745,9 +746,7 @@ if __name__ == "__main__":
         "session_ids": experiment,
     }
     start_time = time()
-
     train_dl = get_multisession_dataloader(list(experiment.keys()), cfg)
-
     end_time = time()
     print(f"Dataloader creation time: {end_time - start_time} seconds")
 
