@@ -36,4 +36,8 @@ echo "Current node: ${SLURM_NODELIST}"
 python --version
 python -m torch.utils.collect_env
 #nvcc -V
-python experanto_sensorium_train_bs8.py 
+# python default_experanto_sensorium_train_bs8_no_beh.py 
+# python experanto_sensorium_train_bs8_no_beh.py --experiment_name common_no_filter
+# python experanto_sensorium_train_bs8_no_beh.py --experiment_name unique_no_filter
+# python experanto_sensorium_train_bs8_no_beh.py --experiment_name common_with_filter
+python experanto_sensorium_train_bs8_no_beh.py --experiment_name unique_with_filter

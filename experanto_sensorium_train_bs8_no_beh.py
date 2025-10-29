@@ -1,4 +1,5 @@
 seed = 42
+import argparse
 import json
 import random
 import sys
@@ -447,6 +448,7 @@ def standard_trainer(
         avg=True,
         flow=model.flow,
         cell_coordinates=None,
+        behavioral_modulation=False,
     )
 
     n_iterations = len(dataloaders["train"])
@@ -709,13 +711,26 @@ def standard_trainer(
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--experiment_name", type=str, default="common_no_filter")
+    args = parser.parse_args()
 
     # full_paths = session_specific_ids_A.keys()
-
-    experiment = session_specific_ids_A
-    print("A")
-    # experiment = session_specific_ids_B
-    # print("B")
+    experiment_name = args.experiment_name
+    print(f"Experiment name: {experiment_name}")
+    CKPT_PATH = f"./test_training/sensorium_model_{experiment_name}/"
+    if experiment_name == "common_no_filter":
+        print("A")
+        experiment = session_specific_ids_A
+    elif experiment_name == "unique_no_filter":
+        print("B")
+        experiment = session_specific_ids_B
+    elif experiment_name == "common_with_filter":
+        print("A")
+        experiment = session_specific_ids_A
+    elif experiment_name == "unique_with_filter":
+        print("B")
+        experiment = session_specific_ids_B
 
     experiment_test = session_specific_ids_test
 
@@ -759,10 +774,11 @@ if __name__ == "__main__":
     ]["screen"]["chunk_size"]
     print(f"stride: {cfg['dataset']['modality_config']['screen']['sample_stride']}")
 
-    # cfg.dataset.modality_config.treadmill.filters.custom_interval_filter = {
-    #     "__key__": "session_specific_id_filter",
-    #     "session_ids": experiment,
-    # }
+    if "with_filter" in experiment_name:
+        cfg.dataset.modality_config.treadmill.filters.custom_interval_filter = {
+            "__key__": "session_specific_id_filter",
+            "session_ids": experiment,
+        }
     start_time = time()
     train_dl = get_multisession_dataloader(list(experiment.keys()), cfg)
     end_time = time()
@@ -846,10 +862,11 @@ if __name__ == "__main__":
     dataloaders = {}
     dataloaders["train"] = train_dl
 
-    # cfg.dataset.modality_config.treadmill.filters.custom_interval_filter = {
-    #     "__key__": "session_specific_id_filter",
-    #     "session_ids": experiment_test,
-    # }
+    if "with_filter" in experiment_name:
+        cfg.dataset.modality_config.treadmill.filters.custom_interval_filter = {
+            "__key__": "session_specific_id_filter",
+            "session_ids": experiment_test,
+        }
     start_time = time()
 
     dataloaders["oracle"] = {}
@@ -888,5 +905,5 @@ if __name__ == "__main__":
         device=device,
         patience=12,  # 12#8,
         scheduler_patience=10,  # 10#6,
-        checkpoint_save_path="./test_training/sensorium_model_common_hash/",
+        checkpoint_save_path=CKPT_PATH,
     )

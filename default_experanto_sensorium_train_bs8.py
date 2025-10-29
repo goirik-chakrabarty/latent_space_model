@@ -394,6 +394,7 @@ def standard_trainer(
         avg=True,
         flow=model.flow,
         cell_coordinates=None,
+        behavioral_modulation=True,
     )
 
     n_iterations = len(dataloaders["train"])
