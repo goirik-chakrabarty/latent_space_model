@@ -559,6 +559,7 @@ def standard_trainer(
             deeplake_ds=False,
             flow=model.flow,
             cell_coordinates=None,
+            behavioral_modulation=False,
         )
 
         if save_checkpoints:

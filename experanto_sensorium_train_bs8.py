@@ -1,10 +1,14 @@
 seed = 42
+import json
+import random
 import sys
 
 # sys.path.append("/srv/user/turishcheva/sensorium_replicate/sensorium_2023/")
 from functools import partial
+from time import time
 
 import numpy as np
+import pandas as pd
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -24,7 +28,6 @@ from neuralpredictors.layers.encoders.mean_variance_functions import fitted_zig_
 from neuralpredictors.layers.encoders.zero_inflation_encoders import ZIGEncoder
 from neuralpredictors.measures import modules, zero_inflated_losses
 from neuralpredictors.training import early_stopping
-from nnfabrik.utility.nn_helpers import set_random_seed
 from sensorium.datasets.mouse_video_loaders import mouse_video_loader
 from sensorium.models.make_model import make_video_model
 from sensorium.utility import scores
@@ -32,33 +35,83 @@ from tqdm import tqdm
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 print(device)
+import common_filters
 from sensorium.utility.scores import get_correlations
 from tqdm import tqdm
 
 from experanto.configs import DEFAULT_CONFIG as cfg
-from experanto.dataloaders import get_multisession_dataloader
+from experanto.dataloaders import (
+    get_multisession_concat_dataloader,
+    get_multisession_dataloader,
+)
 
-pre_path_tr = "/mnt/vast-react/projects/neural_foundation_model/upsampling_without_hamming_30.0Hz/"
-pre_path_test = "/mnt/vast-react/projects/neural_foundation_model/test_upsampling_without_hamming_30.0Hz/"
+file_path = "optimal_trial_details.json"
+data = None
 
-train = [
-    "dynamic29156-11-10-Video-021a75e56847d574b9acbcc06c675055_30hz",
-    "dynamic29228-2-10-Video-021a75e56847d574b9acbcc06c675055_30hz",
-    "dynamic29234-6-9-Video-021a75e56847d574b9acbcc06c675055_30hz",
-    "dynamic29513-3-5-Video-021a75e56847d574b9acbcc06c675055_30hz",
-    "dynamic29514-2-9-Video-021a75e56847d574b9acbcc06c675055_30hz",
-    "dynamic17797-8-5-Video-021a75e56847d574b9acbcc06c675055_30hz",
-]
+with open(file_path, "r") as f:
+    data = json.load(f)
 
-test_folder_scans = [
-    "dynamic26872-17-20-Video-021a75e56847d574b9acbcc06c675055_30hz",
-    "dynamic27204-5-13-Video-021a75e56847d574b9acbcc06c675055_30hz",
-    # 'dynamic29515-10-12-Video-021a75e56847d574b9acbcc06c675055_30hz',
-    # 'dynamic29623-4-9-Video-021a75e56847d574b9acbcc06c675055_30hz',
-    # 'dynamic29647-19-8-Video-021a75e56847d574b9acbcc06c675055_30hz',
-    # 'dynamic29712-5-9-Video-021a75e56847d574b9acbcc06c675055_30hz',
-    # 'dynamic29755-2-8-Video-021a75e56847d574b9acbcc06c675055_30hz'
-]
+df_A = None
+df_B = None
+if data is not None:
+    df_A = pd.DataFrame(data["dataset_A_common_trials"])
+    df_B = pd.DataFrame(data["dataset_B_unique_trials"])
+    print("Data successfully converted to DataFrames.")
+
+set_A = set(df_A.session)
+set_B = set(df_B.session)
+
+common_sessions = list(set_A.intersection(set_B))
+test_folder_scans = random.sample(common_sessions, k=(len(common_sessions) // 5))
+train_sessions_A = list(set_A - set(test_folder_scans))
+train_sessions_B = list(set_B - set(test_folder_scans))
+
+pre_path_tr = (
+    "/mnt/vast-react/projects/neural_foundation_model/upsampling_without_hamming_30.0Hz"
+)
+
+session_specific_ids_A = {
+    os.path.join(pre_path_tr, session): df_A[df_A.session == session].trial_idx.tolist()
+    for session in train_sessions_A
+}
+session_specific_ids_B = {
+    os.path.join(pre_path_tr, session): df_B[df_B.session == session].trial_idx.tolist()
+    for session in train_sessions_B
+}
+session_specific_ids_test_A = {
+    os.path.join(pre_path_tr, session): df_A[df_A.session == session].trial_idx.tolist()
+    for session in test_folder_scans
+}
+session_specific_ids_test_B = {
+    os.path.join(pre_path_tr, session): df_B[df_B.session == session].trial_idx.tolist()
+    for session in test_folder_scans
+}
+# Combine the lists for the same session in A and B test
+session_specific_ids_test = {}
+for session in test_folder_scans:
+    ids_A = session_specific_ids_test_A.get(os.path.join(pre_path_tr, session), [])
+    ids_B = session_specific_ids_test_B.get(os.path.join(pre_path_tr, session), [])
+    combined_ids = list(set(ids_A + ids_B))
+    session_specific_ids_test[os.path.join(pre_path_tr, session)] = combined_ids
+
+# train = [
+#     "dynamic29156-11-10-Video-021a75e56847d574b9acbcc06c675055_30hz",
+#     "dynamic29228-2-10-Video-021a75e56847d574b9acbcc06c675055_30hz",
+#     "dynamic29234-6-9-Video-021a75e56847d574b9acbcc06c675055_30hz",
+#     "dynamic29513-3-5-Video-021a75e56847d574b9acbcc06c675055_30hz",
+#     "dynamic29514-2-9-Video-021a75e56847d574b9acbcc06c675055_30hz",
+#     "dynamic17797-8-5-Video-021a75e56847d574b9acbcc06c675055_30hz",
+# ]
+
+# test_folder_scans = [
+#     "dynamic26872-17-20-Video-021a75e56847d574b9acbcc06c675055_30hz",
+#     "dynamic27204-5-13-Video-021a75e56847d574b9acbcc06c675055_30hz",
+#     # 'dynamic29515-10-12-Video-021a75e56847d574b9acbcc06c675055_30hz',
+#     # 'dynamic29623-4-9-Video-021a75e56847d574b9acbcc06c675055_30hz',
+#     # 'dynamic29647-19-8-Video-021a75e56847d574b9acbcc06c675055_30hz',
+#     # 'dynamic29712-5-9-Video-021a75e56847d574b9acbcc06c675055_30hz',
+#     # 'dynamic29755-2-8-Video-021a75e56847d574b9acbcc06c675055_30hz'
+# ]
 
 factorised_3D_core_dict = dict(
     input_channels=4,
@@ -449,20 +502,22 @@ def standard_trainer(
     batch_no_tot = 0
     ema_values = []
     best_validation_correlation = 0
+    calculate_val_loss = False
     # train over epochs
-    for epoch, val_obj in early_stopping(
-        model,
-        stop_closure,
-        interval=interval,
-        patience=patience,
-        start=epoch,
-        max_iter=max_iter,
-        maximize=maximize,
-        tolerance=tolerance,
-        restore_best=restore_best,
-        scheduler=scheduler,
-        lr_decay_steps=lr_decay_steps,
-    ):
+    # for epoch, val_obj in early_stopping(
+    #     model,
+    #     stop_closure,
+    #     interval=interval,
+    #     patience=patience,
+    #     start=epoch,
+    #     max_iter=max_iter,
+    #     maximize=maximize,
+    #     tolerance=tolerance,
+    #     restore_best=restore_best,
+    #     scheduler=scheduler,
+    #     lr_decay_steps=lr_decay_steps,
+    # ):
+    for epoch in range(max_iter):
 
         # executes callback function if passed in keyword args
         if cb is not None:
@@ -534,50 +589,51 @@ def standard_trainer(
         lr = optimizer.param_groups[0]["lr"]
         ###
         ## after - epoch-analysis
-
-        validation_correlation = get_correlations(
-            model,
-            dataloaders["oracle"],
-            device=device,
-            as_dict=False,
-            per_neuron=False,
-            deeplake_ds=False,
-            flow=model.flow,
-            cell_coordinates=None,
-        )
-
-        if save_checkpoints:
-            if validation_correlation > best_validation_correlation:
-                torch.save(model.state_dict(), f"{checkpoint_save_path}best.pth")
-                best_validation_correlation = validation_correlation
-
-        if loss_function == "PoissonLoss" or (not model.latent):
-            val_loss, _ = full_objective(
+        if calculate_val_loss:
+            validation_correlation = get_correlations(
                 model,
                 dataloaders["oracle"],
-                data_key,
-                *batch_args,
-                **batch_kwargs,
-                detach_core=detach_core,
+                device=device,
+                as_dict=False,
+                per_neuron=False,
+                deeplake_ds=False,
+                flow=model.flow,
+                cell_coordinates=None,
             )
-        else:
-            val_loss, kl_div = full_objective(
-                model,
-                dataloaders["oracle"],
-                data_key,
-                *batch_args,
-                **batch_kwargs,
-                detach_core=detach_core,
-            )
+
+            if save_checkpoints:
+                if validation_correlation > best_validation_correlation:
+                    torch.save(model.state_dict(), f"{checkpoint_save_path}best.pth")
+                    best_validation_correlation = validation_correlation
+
+            if loss_function == "PoissonLoss" or (not model.latent):
+                val_loss, _ = full_objective(
+                    model,
+                    dataloaders["oracle"],
+                    data_key,
+                    *batch_args,
+                    **batch_kwargs,
+                    detach_core=detach_core,
+                )
+            else:
+                val_loss, kl_div = full_objective(
+                    model,
+                    dataloaders["oracle"],
+                    data_key,
+                    *batch_args,
+                    **batch_kwargs,
+                    detach_core=detach_core,
+                )
 
         # torch.save(
         # model.state_dict(), f"toymodels2/temp_save.pth"
         # )
 
-        print(
-            f"Epoch {epoch}, Batch {batch_no}, Train loss {loss}, Validation loss {val_loss}"
-        )
-        print(f"EPOCH={epoch}  validation_correlation={validation_correlation}")
+        print(f"Epoch {epoch}, Batch {batch_no}, Train loss {loss}")
+        if calculate_val_loss:
+            print(
+                f"EPOCH={epoch}  validation_correlation={validation_correlation} validation_loss={val_loss}"
+            )
 
         ema_values.append(validation_correlation)
         ema = calculate_ema(torch.tensor(ema_values), ema_span)[-1]
@@ -586,12 +642,12 @@ def standard_trainer(
                 "Epoch Train loss": epoch_loss,
                 "Batch": batch_no_tot,
                 "Epoch": epoch,
-                "validation_correlation": validation_correlation,
+                # "validation_correlation": validation_correlation,
                 # "log_det": log_det,
-                "Epoch validation loss": val_loss,
-                "EMA validation loss": ema,
+                # "Epoch validation loss": val_loss,
+                # "EMA validation loss": ema,
                 # "Poisson Loss": pos_loss,
-                "ZIG Loss": val_loss,
+                # "ZIG Loss": val_loss,
                 "Learning rate": lr,
             }
             wandb.log(wandb_dict)
@@ -602,42 +658,48 @@ def standard_trainer(
     model.eval()
     # if save_checkpoints:
     # torch.save(model.state_dict(), f"{checkpoint_save_path}final.pth")
+    if calculate_val_loss:
+        # Compute avg validation and test correlation
+        validation_correlation = get_correlations(
+            model,
+            dataloaders["oracle"],
+            device=device,
+            as_dict=False,
+            per_neuron=False,
+            deeplake_ds=False,
+            flow=model.flow,
+            cell_coordinates=None,
+        )
+        print(f"\n\n FINAL validation_correlation {validation_correlation} \n\n")
 
-    # Compute avg validation and test correlation
-    validation_correlation = get_correlations(
-        model,
-        dataloaders["oracle"],
-        device=device,
-        as_dict=False,
-        per_neuron=False,
-        deeplake_ds=False,
-        flow=model.flow,
-        cell_coordinates=None,
-    )
-    print(f"\n\n FINAL validation_correlation {validation_correlation} \n\n")
+        output = {}
+        output["validation_corr"] = validation_correlation
 
-    output = {}
-    output["validation_corr"] = validation_correlation
-
-    score = np.mean(validation_correlation)
+        score = np.mean(validation_correlation)
     if use_wandb:
         wandb.finish()
 
-    # removing the checkpoints except the last one
-    to_clean = os.listdir(checkpoint_save_path)
-    # to_clean = os.listdir("toymodels")
-    for f2c in to_clean:
-        if "epoch" in f2c:
-            os.remove(os.path.join(checkpoint_save_path, f2c))
+    if epoch == max_iter - 1 or epoch % 10 == 0:
+        torch.save(model.state_dict(), f"{checkpoint_save_path}{epoch}.pth")
+
+    # # removing the checkpoints except the last one
+    # to_clean = os.listdir(checkpoint_save_path)
+    # # to_clean = os.listdir("toymodels")
+    # for f2c in to_clean:
+    #     if "epoch" in f2c:
+    #         os.remove(os.path.join(checkpoint_save_path, f2c))
 
     return score
 
 
 if __name__ == "__main__":
 
-    full_paths = [f"{pre_path_tr}{t}/" for t in train] + [
-        f"{pre_path_test}{t}/" for t in test_folder_scans
-    ]
+    # full_paths = session_specific_ids_A.keys()
+    experiment = session_specific_ids_A
+    print("A")
+    # experiment = session_specific_ids_B
+    # print("B")
+    experiment_test = session_specific_ids_test
 
     cfg["dataset"]["modality_config"]["responses"]["sampling_rate"] = 30
     cfg["dataset"]["modality_config"]["responses"]["chunk_size"] = 80
@@ -666,7 +728,7 @@ if __name__ == "__main__":
         )
 
     cfg["dataloader"]["prefetch_factor"] = 2
-    cfg["dataloader"]["num_workers"] = 4
+    cfg["dataloader"]["num_workers"] = 1
     cfg["dataloader"]["shuffle"] = True
     cfg["dataloader"]["pin_memory"] = False
     # cfg['dataset']['add_behavior_as_channels'] = True
@@ -678,7 +740,15 @@ if __name__ == "__main__":
         "modality_config"
     ]["screen"]["chunk_size"]
     print(f"stride: {cfg['dataset']['modality_config']['screen']['sample_stride']}")
-    train_dl = get_multisession_dataloader(full_paths, cfg)
+
+    cfg.dataset.modality_config.treadmill.filters.custom_interval_filter = {
+        "__key__": "session_specific_id_filter",
+        "session_ids": experiment,
+    }
+    start_time = time()
+    train_dl = get_multisession_dataloader(list(experiment.keys()), cfg)
+    end_time = time()
+    print(f"Dataloader creation time: {end_time - start_time} seconds")
 
     mean_activity_dict = {}
     n_neurons_dict = {}
@@ -750,20 +820,35 @@ if __name__ == "__main__":
     cfg["dataset"]["modality_config"]["screen"]["sampling_rate"] = 30
     cfg["dataset"]["modality_config"]["screen"]["chunk_size"] = 60
 
-    cfg.dataset.modality_config.screen.valid_condition = {"tier": "validation"}
+    # cfg.dataset.modality_config.screen.valid_condition = {"tier": "validation"}
     cfg["dataset"]["modality_config"]["screen"]["sample_stride"] = cfg["dataset"][
         "modality_config"
     ]["screen"]["chunk_size"]
 
     dataloaders = {}
     dataloaders["train"] = train_dl
-    # todo - undo it after the validation set labels are updated
-    # dataloaders["oracle"] = val_dl
+
+    cfg.dataset.modality_config.treadmill.filters.custom_interval_filter = {
+        "__key__": "session_specific_id_filter",
+        "session_ids": experiment_test,
+    }
+    start_time = time()
+
     dataloaders["oracle"] = {}
-    for m in full_paths:
+    for m in experiment_test.keys():
         dataloaders["oracle"][m.split("dynamic")[-1].split("-Video")[0]] = (
             get_multisession_dataloader([m], cfg)
         )
+
+    end_time = time()
+    print(f"Dataloader creation time: {end_time - start_time} seconds")
+    # todo - undo it after the validation set labels are updated
+    # dataloaders["oracle"] = val_dl
+    # dataloaders["oracle"] = {}
+    # for m in full_paths:
+    #     dataloaders["oracle"][m.split("dynamic")[-1].split("-Video")[0]] = (
+    #         get_multisession_dataloader([m], cfg)
+    #     )
 
     lr_inint = 5e-3
     min_lr = 1e-5
@@ -785,5 +870,5 @@ if __name__ == "__main__":
         device=device,
         patience=12,  # 12#8,
         scheduler_patience=10,  # 10#6,
-        checkpoint_save_path="./test_training/sensorium_model_8_mice_with_bs8_stride_80_4days/",
+        checkpoint_save_path="./test_training/sensorium_model_common_hash/",
     )

@@ -502,7 +502,7 @@ def standard_trainer(
     batch_no_tot = 0
     ema_values = []
     best_validation_correlation = 0
-    calculate_val_loss = False
+    calculate_val_loss = True
     # train over epochs
     # for epoch, val_obj in early_stopping(
     #     model,
@@ -614,6 +614,7 @@ def standard_trainer(
                 deeplake_ds=False,
                 flow=model.flow,
                 cell_coordinates=None,
+                behavioral_modulation=False,
             )
 
             if save_checkpoints:
@@ -649,9 +650,8 @@ def standard_trainer(
             print(
                 f"EPOCH={epoch}  validation_correlation={validation_correlation} validation_loss={val_loss}"
             )
-
-        ema_values.append(validation_correlation)
-        ema = calculate_ema(torch.tensor(ema_values), ema_span)[-1]
+            ema_values.append(validation_correlation)
+            ema = calculate_ema(torch.tensor(ema_values), ema_span)[-1]
         if use_wandb:
             wandb_dict = {
                 "Epoch Train loss": epoch_loss,
@@ -684,6 +684,7 @@ def standard_trainer(
             deeplake_ds=False,
             flow=model.flow,
             cell_coordinates=None,
+            behavioral_modulation=False,
         )
         print(f"\n\n FINAL validation_correlation {validation_correlation} \n\n")
 
@@ -710,10 +711,12 @@ def standard_trainer(
 if __name__ == "__main__":
 
     # full_paths = session_specific_ids_A.keys()
-    # experiment = session_specific_ids_A
-    # print("A")
-    experiment = session_specific_ids_B
-    print("B")
+
+    experiment = session_specific_ids_A
+    print("A")
+    # experiment = session_specific_ids_B
+    # print("B")
+
     experiment_test = session_specific_ids_test
 
     cfg["dataset"]["modality_config"]["responses"]["sampling_rate"] = 30
@@ -756,10 +759,10 @@ if __name__ == "__main__":
     ]["screen"]["chunk_size"]
     print(f"stride: {cfg['dataset']['modality_config']['screen']['sample_stride']}")
 
-    cfg.dataset.modality_config.treadmill.filters.custom_interval_filter = {
-        "__key__": "session_specific_id_filter",
-        "session_ids": experiment,
-    }
+    # cfg.dataset.modality_config.treadmill.filters.custom_interval_filter = {
+    #     "__key__": "session_specific_id_filter",
+    #     "session_ids": experiment,
+    # }
     start_time = time()
     train_dl = get_multisession_dataloader(list(experiment.keys()), cfg)
     end_time = time()
@@ -843,10 +846,10 @@ if __name__ == "__main__":
     dataloaders = {}
     dataloaders["train"] = train_dl
 
-    cfg.dataset.modality_config.treadmill.filters.custom_interval_filter = {
-        "__key__": "session_specific_id_filter",
-        "session_ids": experiment_test,
-    }
+    # cfg.dataset.modality_config.treadmill.filters.custom_interval_filter = {
+    #     "__key__": "session_specific_id_filter",
+    #     "session_ids": experiment_test,
+    # }
     start_time = time()
 
     dataloaders["oracle"] = {}

@@ -4,7 +4,6 @@ import warnings
 import numpy as np
 import torch
 import torch.distributions as dist
-
 from neuralpredictors.measures.np_functions import corr
 from neuralpredictors.training import device_state
 
@@ -23,6 +22,7 @@ def model_predictions(
     flow=False,
     dropout_prob=None,
     cell_coordinates=None,
+    behavioral_modulation=False,
 ):
     """
     computes model predictions for a given dataloader and a model
@@ -36,27 +36,43 @@ def model_predictions(
 
     for _, batch in dataloader:
 
-        beh = torch.cat([batch['eye_tracker'][:, :, :2].transpose(2, 1), batch['treadmill'][:, :, :2].transpose(2, 1)], axis=1)
-        video = batch['screen']
+        beh = torch.cat(
+            [
+                batch["eye_tracker"][:, :, :2].transpose(2, 1),
+                batch["treadmill"][:, :, :2].transpose(2, 1),
+            ],
+            axis=1,
+        )
+        video = batch["screen"]
         b_expanded = beh.unsqueeze(-1).unsqueeze(-1)  # or b[:, :, :, None, None]
         # Now broadcast b to match the spatial dimensions [16, 3, 60, 144, 256]
         beh_tiled = b_expanded.expand(-1, -1, -1, video.shape[3], video.shape[4])
         # Concatenate along dim=1 to get [16, 4, 60, 144, 256]
-        
-        responses = batch['responses'].transpose(2, 1)
-        with torch.no_grad():
 
+        responses = batch["responses"].transpose(2, 1)
+        with torch.no_grad():
             resp = responses.detach().cpu()[:, :, skip:]
             target = target + list(resp)
             with device_state(model, device):
                 responses = responses.to(device)
-                video = torch.cat([video, beh_tiled], dim=1).to(device)
-                batch_kwargs = {
-                    'videos': video,
-                    'pupil_center_core': batch['eye_tracker'][:, :, 2:].transpose(2, 1).to(device),
-                    'responses': responses,
-                    'pupil_center': batch['eye_tracker'][:, :, 2:].transpose(2, 1).to(device),
-                }
+                if behavioral_modulation:
+                    video = torch.cat([video, beh_tiled], dim=1).to(device)
+                    batch_kwargs = {
+                        "videos": video,
+                        "pupil_center_core": batch["eye_tracker"][:, :, 2:]
+                        .transpose(2, 1)
+                        .to(device),
+                        "responses": responses,
+                        "pupil_center": batch["eye_tracker"][:, :, 2:]
+                        .transpose(2, 1)
+                        .to(device),
+                    }
+                else:
+                    video = video.to(device)
+                    batch_kwargs = {
+                        "videos": video,
+                        "responses": responses,
+                    }
                 images = video
                 out_predicts = True
                 if model.position_features:
@@ -119,6 +135,7 @@ def get_correlations(
     flow=False,
     dropout_prob=None,
     cell_coordinates=None,
+    behavioral_modulation=False,
     **kwargs,
 ):
     """
@@ -158,6 +175,7 @@ def get_correlations(
             flow=flow,
             dropout_prob=dropout_prob,
             cell_coordinates=cell_coordinates,
+            behavioral_modulation=behavioral_modulation,
         )
         target = np.concatenate(target, axis=1).T
         output = np.concatenate(output, axis=1).T
