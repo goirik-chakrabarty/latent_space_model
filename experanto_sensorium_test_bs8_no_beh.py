@@ -347,8 +347,8 @@ if __name__ == "__main__":
     parser.add_argument("--experiment_name", type=str, default="test_transfer")
     args = parser.parse_args()
 
-    set_random_seed(42)
     seed = 42
+    set_random_seed(seed)
 
     # --- DATA SPLITTING LOGIC (Preserved) ---
     save_path = "trial_details/optimal_trial_details_with_split.json"
@@ -360,42 +360,10 @@ if __name__ == "__main__":
             trial_details = json.load(f)
         session_specific_ids_test = trial_details.get("session_specific_ids_test", {})
     else:
-        # Fallback if split file doesn't exist (copying logic from original)
-        with open(raw_path, "r") as f:
-            data = json.load(f)
-        df_A = pd.DataFrame(data["dataset_A_common_trials"])
-        df_B = pd.DataFrame(data["dataset_B_unique_trials"])
-        set_A = set(df_A.session)
-        set_B = set(df_B.session)
-        common_sessions = list(set_A.intersection(set_B))
-        test_folder_scans = random.sample(
-            common_sessions, k=(len(common_sessions) // 5)
+        # Raise error that training must be run first
+        raise FileNotFoundError(
+            f"{save_path} not found. Please run the initial training script to generate trial details."
         )
-
-        pre_path_tr = "/mnt/vast-react/projects/neural_foundation_model/upsampling_without_hamming_30.0Hz"
-
-        session_specific_ids_test_A = {
-            os.path.join(pre_path_tr, session): df_A[
-                df_A.session == session
-            ].trial_idx.tolist()
-            for session in test_folder_scans
-        }
-        session_specific_ids_test_B = {
-            os.path.join(pre_path_tr, session): df_B[
-                df_B.session == session
-            ].trial_idx.tolist()
-            for session in test_folder_scans
-        }
-        session_specific_ids_test = {}
-        for session in test_folder_scans:
-            ids_A = session_specific_ids_test_A.get(
-                os.path.join(pre_path_tr, session), []
-            )
-            ids_B = session_specific_ids_test_B.get(
-                os.path.join(pre_path_tr, session), []
-            )
-            combined_ids = list(set(ids_A + ids_B))
-            session_specific_ids_test[os.path.join(pre_path_tr, session)] = combined_ids
 
     # --- DATALOADER PREPARATION ---
     # The 'experiment' here is the TEST set from original, used for TRANSFER training
@@ -403,31 +371,46 @@ if __name__ == "__main__":
     print(f"Transfer Learning on {len(experiment_transfer)} sessions.")
 
     # Truncation logic (from original)
+    print("Applying truncation")
     experiment_transfer = dict(list(experiment_transfer.items())[:])
+    experiment_transfer_test = dict(list(experiment_transfer.items())[:])
     for k in experiment_transfer.keys():
-        # Using same truncation logic for consistency, or remove if you want full test set
         n = len(experiment_transfer[k])
-        experiment_transfer[k] = experiment_transfer[k][4 * n // 6 :]
-        print(f"Session {k}: {len(experiment_transfer[k])} trials")
+        experiment_transfer[k] = experiment_transfer[k][: 4 * n // 6]
+        experiment_transfer_test[k] = experiment_transfer_test[k][4 * n // 6 :]
+        print(k, len(experiment_transfer[k]), len(experiment_transfer_test[k]))
 
-    # Config updates (from original)
     cfg["dataset"]["modality_config"]["responses"]["sampling_rate"] = 30
     cfg["dataset"]["modality_config"]["responses"]["chunk_size"] = 80
+
     cfg["dataset"]["modality_config"]["eye_tracker"]["sampling_rate"] = 30
     cfg["dataset"]["modality_config"]["eye_tracker"]["chunk_size"] = 80
+
     cfg["dataset"]["modality_config"]["treadmill"]["sampling_rate"] = 30
     cfg["dataset"]["modality_config"]["treadmill"]["chunk_size"] = 80
+
     cfg["dataset"]["modality_config"]["screen"]["sampling_rate"] = 30
     cfg["dataset"]["modality_config"]["screen"]["chunk_size"] = 80
+
     cfg["dataset"]["modality_config"]["screen"]["transforms"]["normalization"] = {
         "mean": 113,
         "std": 59,
     }
+
     cfg["dataloader"]["batch_size"] = 8
+
+    for k in cfg.dataset.modality_config.keys():
+        print(
+            k,
+            cfg.dataset.modality_config[k].sampling_rate,
+            cfg.dataset.modality_config[k].chunk_size,
+        )
+
     cfg["dataloader"]["prefetch_factor"] = 2
     cfg["dataloader"]["num_workers"] = 1
     cfg["dataloader"]["shuffle"] = True
     cfg["dataloader"]["pin_memory"] = False
+    # cfg['dataset']['add_behavior_as_channels'] = True
     cfg["dataset"]["modality_config"]["screen"]["transforms"]["Resize"]["size"] = [
         36,
         64,
@@ -444,7 +427,10 @@ if __name__ == "__main__":
 
     # Create Transfer Dataloader
     print("Creating Transfer Dataloaders...")
+    start_time = time()
     train_dl = get_multisession_dataloader(list(experiment_transfer.keys()), cfg)
+    end_time = time()
+    print(f"Dataloader creation time: {end_time - start_time} seconds")
 
     # Calculate statistics for the NEW readout
     mean_activity_dict = {}
@@ -515,18 +501,43 @@ if __name__ == "__main__":
     factorised_3d_model.to(device)
 
     # --- PREPARE DATALOADERS DICT ---
-    # For transfer, we train on the 'test' set.
-    # Ideally, we should split this into train/val, but following the simple test pattern,
-    # we use the same loader for oracle or a subset if available.
+    latent = False
+
+    cfg["dataset"]["modality_config"]["responses"]["sampling_rate"] = 30
+    cfg["dataset"]["modality_config"]["responses"]["chunk_size"] = 60
+
+    cfg["dataset"]["modality_config"]["eye_tracker"]["sampling_rate"] = 30
+    cfg["dataset"]["modality_config"]["eye_tracker"]["chunk_size"] = 60
+
+    cfg["dataset"]["modality_config"]["treadmill"]["sampling_rate"] = 30
+    cfg["dataset"]["modality_config"]["treadmill"]["chunk_size"] = 60
+
+    cfg["dataset"]["modality_config"]["screen"]["sampling_rate"] = 30
+    cfg["dataset"]["modality_config"]["screen"]["chunk_size"] = 60
+
+    # cfg.dataset.modality_config.screen.valid_condition = {"tier": "validation"}
+    cfg["dataset"]["modality_config"]["screen"]["sample_stride"] = cfg["dataset"][
+        "modality_config"
+    ]["screen"]["chunk_size"]
+
     dataloaders = {}
     dataloaders["train"] = train_dl
 
+    # Filter logic
+    cfg.dataset.modality_config.treadmill.filters.custom_interval_filter = {
+        "__key__": "session_specific_id_filter",
+        "session_ids": experiment_transfer_test,
+    }
+
     # Creating a separate oracle loader (same data, just for metric calculation)
+    start_time = time()
     dataloaders["oracle"] = {}
     for m in experiment_transfer.keys():
         dataloaders["oracle"][m.split("dynamic")[-1].split("-Video")[0]] = (
             get_multisession_dataloader([m], cfg)
         )
+    end_time = time()
+    print(f"Dataloader creation time: {end_time - start_time} seconds")
 
     # --- RUN TRANSFER TRAINING ---
     lr_inint = 5e-3
