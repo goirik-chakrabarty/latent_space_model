@@ -1,6 +1,7 @@
 seed = 42
 import argparse
 import json
+import os
 import random
 import sys
 
@@ -14,13 +15,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
-from nnfabrik.utility.nn_helpers import set_random_seed
-from torch.distributions.kl import kl_divergence
-from torch.distributions.normal import Normal
-
-set_random_seed(seed)
-import os
-
 import wandb
 from eval import eval_model
 from moments import load_mean_variance
@@ -29,9 +23,12 @@ from neuralpredictors.layers.encoders.mean_variance_functions import fitted_zig_
 from neuralpredictors.layers.encoders.zero_inflation_encoders import ZIGEncoder
 from neuralpredictors.measures import modules, zero_inflated_losses
 from neuralpredictors.training import early_stopping
+from nnfabrik.utility.nn_helpers import set_random_seed
 from sensorium.datasets.mouse_video_loaders import mouse_video_loader
 from sensorium.models.make_model import make_video_model
 from sensorium.utility import scores
+from torch.distributions.kl import kl_divergence
+from torch.distributions.normal import Normal
 from tqdm import tqdm
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -46,54 +43,79 @@ from experanto.dataloaders import (
     get_multisession_dataloader,
 )
 
-file_path = "optimal_trial_details.json"
-data = None
+set_random_seed(seed)
 
-with open(file_path, "r") as f:
-    data = json.load(f)
+# if train_sessions_A, train_sessions_B, session_specific_ids_test are defined is json in trial_details, then use them directly else read from optimal_trial_details.json and create them and save them in trial_details folder
+save_path = "trial_details/optimal_trial_details_with_split.json"
+raw_path = "trial_details/optimal_trial_details.json"
+if os.path.exists(save_path):
+    with open(save_path, "r") as f:
+        trial_details = json.load(f)
+    session_specific_ids_A = trial_details.get("session_specific_ids_A", {})
+    session_specific_ids_B = trial_details.get("session_specific_ids_B", {})
+    session_specific_ids_test = trial_details.get("session_specific_ids_test", {})
+else:
+    with open(raw_path, "r") as f:
+        data = json.load(f)
 
-df_A = None
-df_B = None
-if data is not None:
-    df_A = pd.DataFrame(data["dataset_A_common_trials"])
-    df_B = pd.DataFrame(data["dataset_B_unique_trials"])
-    print("Data successfully converted to DataFrames.")
+    df_A = None
+    df_B = None
+    if data is not None:
+        df_A = pd.DataFrame(data["dataset_A_common_trials"])
+        df_B = pd.DataFrame(data["dataset_B_unique_trials"])
+        print("Data successfully converted to DataFrames.")
 
-set_A = set(df_A.session)
-set_B = set(df_B.session)
+    set_A = set(df_A.session)
+    set_B = set(df_B.session)
 
-common_sessions = list(set_A.intersection(set_B))
-test_folder_scans = random.sample(common_sessions, k=(len(common_sessions) // 5))
-train_sessions_A = list(set_A - set(test_folder_scans))
-train_sessions_B = list(set_B - set(test_folder_scans))
+    common_sessions = list(set_A.intersection(set_B))
+    test_folder_scans = random.sample(common_sessions, k=(len(common_sessions) // 5))
+    train_sessions_A = list(set_A - set(test_folder_scans))
+    train_sessions_B = list(set_B - set(test_folder_scans))
 
-pre_path_tr = (
-    "/mnt/vast-react/projects/neural_foundation_model/upsampling_without_hamming_30.0Hz"
-)
+    pre_path_tr = "/mnt/vast-react/projects/neural_foundation_model/upsampling_without_hamming_30.0Hz"
 
-session_specific_ids_A = {
-    os.path.join(pre_path_tr, session): df_A[df_A.session == session].trial_idx.tolist()
-    for session in train_sessions_A
-}
-session_specific_ids_B = {
-    os.path.join(pre_path_tr, session): df_B[df_B.session == session].trial_idx.tolist()
-    for session in train_sessions_B
-}
-session_specific_ids_test_A = {
-    os.path.join(pre_path_tr, session): df_A[df_A.session == session].trial_idx.tolist()
-    for session in test_folder_scans
-}
-session_specific_ids_test_B = {
-    os.path.join(pre_path_tr, session): df_B[df_B.session == session].trial_idx.tolist()
-    for session in test_folder_scans
-}
-# Combine the lists for the same session in A and B test
-session_specific_ids_test = {}
-for session in test_folder_scans:
-    ids_A = session_specific_ids_test_A.get(os.path.join(pre_path_tr, session), [])
-    ids_B = session_specific_ids_test_B.get(os.path.join(pre_path_tr, session), [])
-    combined_ids = list(set(ids_A + ids_B))
-    session_specific_ids_test[os.path.join(pre_path_tr, session)] = combined_ids
+    session_specific_ids_A = {
+        os.path.join(pre_path_tr, session): df_A[
+            df_A.session == session
+        ].trial_idx.tolist()
+        for session in train_sessions_A
+    }
+    session_specific_ids_B = {
+        os.path.join(pre_path_tr, session): df_B[
+            df_B.session == session
+        ].trial_idx.tolist()
+        for session in train_sessions_B
+    }
+    session_specific_ids_test_A = {
+        os.path.join(pre_path_tr, session): df_A[
+            df_A.session == session
+        ].trial_idx.tolist()
+        for session in test_folder_scans
+    }
+    session_specific_ids_test_B = {
+        os.path.join(pre_path_tr, session): df_B[
+            df_B.session == session
+        ].trial_idx.tolist()
+        for session in test_folder_scans
+    }
+    # Combine the lists for the same session in A and B test
+    session_specific_ids_test = {}
+    for session in test_folder_scans:
+        ids_A = session_specific_ids_test_A.get(os.path.join(pre_path_tr, session), [])
+        ids_B = session_specific_ids_test_B.get(os.path.join(pre_path_tr, session), [])
+        combined_ids = list(set(ids_A + ids_B))
+        session_specific_ids_test[os.path.join(pre_path_tr, session)] = combined_ids
+
+    # Add the newly created lists and dict to the data dictionary
+    data["session_specific_ids_A"] = session_specific_ids_A
+    data["session_specific_ids_B"] = session_specific_ids_B
+    data["session_specific_ids_test"] = session_specific_ids_test
+
+    # Save the updated data back to the file
+    print(f"Saving computed train/test splits to {save_path}...")
+    with open(save_path, "w") as f:
+        json.dump(data, f, indent=4)
 
 # train = [
 #     "dynamic29156-11-10-Video-021a75e56847d574b9acbcc06c675055_30hz",
@@ -433,7 +455,6 @@ def standard_trainer(
 
     ##### Model training ####################################################################################################
     model.to(device)
-    set_random_seed(seed)
     model.train()
     if loss_function == "ZIGLoss":
         zig_loss_instance = zero_inflated_losses.ZIGLoss()
@@ -659,12 +680,12 @@ def standard_trainer(
                 "Epoch Train loss": epoch_loss,
                 "Batch": batch_no_tot,
                 "Epoch": epoch,
-                # "validation_correlation": validation_correlation,
+                "validation_correlation": validation_correlation,
                 # "log_det": log_det,
-                # "Epoch validation loss": val_loss,
-                # "EMA validation loss": ema,
+                "Epoch validation loss": val_loss,
+                "EMA validation loss": ema,
                 # "Poisson Loss": pos_loss,
-                # "ZIG Loss": val_loss,
+                "ZIG Loss": val_loss,
                 "Learning rate": lr,
             }
             wandb.log(wandb_dict)
@@ -712,13 +733,14 @@ def standard_trainer(
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--experiment_name", type=str, default="common_no_filter")
+    parser.add_argument("--experiment_name", type=str, default="unique_with_filter")
     args = parser.parse_args()
 
     # full_paths = session_specific_ids_A.keys()
     experiment_name = args.experiment_name
     print(f"Experiment name: {experiment_name}")
     CKPT_PATH = f"./test_training/sensorium_model_{experiment_name}/"
+    os.makedirs(CKPT_PATH, exist_ok=True)
     if experiment_name == "common_no_filter":
         print("A")
         experiment = session_specific_ids_A
@@ -733,6 +755,19 @@ if __name__ == "__main__":
         experiment = session_specific_ids_B
 
     experiment_test = session_specific_ids_test
+
+    print("Experiment lengths>>>>>>>>>>>>>>>>>>>>")
+    print(len(experiment))
+    print(len(experiment_test))
+    # truncate experiments for testing
+    experiment = dict(list(experiment.items())[:])
+    experiment_test = dict(list(experiment.items())[:])
+
+    for k in experiment.keys():
+        n = len(experiment[k])
+        experiment[k] = experiment[k][: 4 * n // 6]
+        experiment_test[k] = experiment_test[k][4 * n // 6 :]
+        print(k, len(experiment[k]), len(experiment_test[k]))
 
     cfg["dataset"]["modality_config"]["responses"]["sampling_rate"] = 30
     cfg["dataset"]["modality_config"]["responses"]["chunk_size"] = 80
@@ -893,9 +928,9 @@ if __name__ == "__main__":
     validation_score = standard_trainer(
         factorised_3d_model,
         dataloaders,
-        111,
+        seed=seed,
         use_wandb=True,
-        wandb_name="sensorium_model_8_mice_with_bs8_stride_80_4days",
+        wandb_name=f"sensorium_model_{experiment_name}_bs8_no_beh",
         loss_function="PoissonLoss",
         # loss_function= "PoissonLoss",
         verbose=True,
