@@ -23,6 +23,7 @@ from neuralpredictors.layers.encoders.zero_inflation_encoders import ZIGEncoder
 from neuralpredictors.measures import modules, zero_inflated_losses
 from neuralpredictors.training import early_stopping
 from nnfabrik.utility.nn_helpers import set_random_seed
+from omegaconf import OmegaConf
 from sensorium.datasets.mouse_video_loaders import mouse_video_loader
 from sensorium.models.make_model import make_video_model
 from sensorium.utility import scores
@@ -383,6 +384,7 @@ if __name__ == "__main__":
         experiment_transfer_test[k] = experiment_transfer_test[k][4 * n // 6 :]
         print(k, len(experiment_transfer[k]), len(experiment_transfer_test[k]))
 
+    cfg.dataset.modality_config.screen.valid_condition = {}  # Forces all tiers
     cfg["dataset"]["modality_config"]["responses"]["sampling_rate"] = 30
     cfg["dataset"]["modality_config"]["responses"]["chunk_size"] = 80
 
@@ -425,12 +427,10 @@ if __name__ == "__main__":
     # Filter logic
     print("Applying Custom Filter...")
     # Safe assignment preserving nan_filter
-    if not hasattr(cfg.dataset.modality_config.treadmill, "filters"):
-        from omegaconf import OmegaConf
+    if not hasattr(cfg.dataset.modality_config.screen, "filters"):
+        cfg.dataset.modality_config.screen.filters = OmegaConf.create({})
 
-        cfg.dataset.modality_config.treadmill.filters = OmegaConf.create({})
-
-    cfg.dataset.modality_config.treadmill.filters["custom_interval_filter"] = {
+    cfg.dataset.modality_config.screen.filters["custom_interval_filter"] = {
         "__key__": "session_specific_id_filter",
         "session_ids": experiment_transfer,
     }
@@ -492,6 +492,8 @@ if __name__ == "__main__":
     print(f"EXPECTED BATCHES (bs=8): {total_chunks // 8}")
     print("=" * 40 + "\n")
     ############## DEBUGGING ENDS HERE
+
+    advsdv
 
     # Calculate statistics for the NEW readout
     mean_activity_dict = {}

@@ -1,5 +1,6 @@
-import numpy as np
 import json
+
+import numpy as np
 
 from experanto.datasets import (
     register_callable,  # need to import this to register the function
@@ -60,11 +61,13 @@ def session_specific_id_filter(session_ids={}, complement=False):
     Returns:
         A function that can be used as a filter in the experanto library.
     """
-    def implementation(device_: Interpolator,
-                       session_path: str,
-                       session_ids=session_ids,
-                       complement=complement):
 
+    def implementation(
+        device_: Interpolator,
+        session_path: str,
+        session_ids=session_ids,
+        complement=complement,
+    ):
 
         id_list = session_ids.get(str(session_path), [])
 
@@ -72,9 +75,10 @@ def session_specific_id_filter(session_ids={}, complement=False):
             return []
 
         id_list = sorted(id_list)
+        id_list = [f"{i:05d}" for i in id_list]  # zero-pad IDs to match meta format
 
         meta_path = f"{session_path}/screen/combined_meta.json"
-        with open(meta_path, 'rb') as f:
+        with open(meta_path, "rb") as f:
             meta = json.load(f)
 
         if complement:
@@ -83,7 +87,9 @@ def session_specific_id_filter(session_ids={}, complement=False):
             complement_ids = sorted(all_ids - used_ids)
             # Create a temporary session_ids dict for the recursive call
             temp_session_ids = {session_path: complement_ids}
-            return session_specific_id_filter(session_ids=temp_session_ids)(device_, session_path)
+            return session_specific_id_filter(session_ids=temp_session_ids)(
+                device_, session_path
+            )
 
         timestamps = np.load(f"{session_path}/screen/timestamps.npy")
 
@@ -91,8 +97,8 @@ def session_specific_id_filter(session_ids={}, complement=False):
         for i in range(len(id_list)):
             image_id = id_list[i]
             if image_id in meta:
-                start = meta[image_id]['first_frame_idx']
-                end = start + meta[image_id]['num_frames']
+                start = meta[image_id]["first_frame_idx"]
+                end = start + meta[image_id]["num_frames"]
                 intervals.append(TimeInterval(timestamps[start], timestamps[end]))
 
         return uniquefy_interval_array(intervals)
