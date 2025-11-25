@@ -33,6 +33,7 @@ from tqdm import tqdm
 device = "cuda" if torch.cuda.is_available() else "cpu"
 print(device)
 import common_filters
+from debug import debug_filter_consistency
 from sensorium.utility.scores import get_correlations
 from tqdm import tqdm
 
@@ -281,8 +282,10 @@ def standard_trainer(
 
             if validation_correlation > best_validation_correlation:
                 best_validation_correlation = validation_correlation
-                # Optional: Save best readout
-                # torch.save(model.state_dict(), f"{checkpoint_save_path}best_transfer.pth")
+                # Save best readout
+                torch.save(
+                    model.state_dict(), f"{checkpoint_save_path}best_transfer.pth"
+                )
 
             val_loss, _ = full_objective(
                 model,
@@ -420,7 +423,14 @@ if __name__ == "__main__":
     ]["screen"]["chunk_size"]
 
     # Filter logic
-    cfg.dataset.modality_config.treadmill.filters.custom_interval_filter = {
+    print("Applying Custom Filter...")
+    # Safe assignment preserving nan_filter
+    if not hasattr(cfg.dataset.modality_config.treadmill, "filters"):
+        from omegaconf import OmegaConf
+
+        cfg.dataset.modality_config.treadmill.filters = OmegaConf.create({})
+
+    cfg.dataset.modality_config.treadmill.filters["custom_interval_filter"] = {
         "__key__": "session_specific_id_filter",
         "session_ids": experiment_transfer,
     }
@@ -431,6 +441,57 @@ if __name__ == "__main__":
     train_dl = get_multisession_dataloader(list(experiment_transfer.keys()), cfg)
     end_time = time()
     print(f"Dataloader creation time: {end_time - start_time} seconds")
+
+    ############## DEBUGGING: DATASET DIAGNOSTICS
+    print("\n" + "=" * 40)
+    print(" DEBUG: DATASET DIAGNOSTICS")
+    print("=" * 40)
+
+    debug_filter_consistency(train_dl, experiment_transfer)
+
+    # 1. Check the active Valid Condition (e.g., is it 'train', 'test', 'validation'?)
+    screen_config = cfg.dataset.modality_config.screen
+    print(f"Active Valid Condition: {screen_config.get('valid_condition', 'Not Set')}")
+    print(
+        f"Filter Configured: {hasattr(cfg.dataset.modality_config.treadmill, 'filters')}"
+    )
+
+    # 2. Check individual session lengths
+    total_chunks = 0
+    for key, loader in train_dl.loaders.items():
+        ds_len = len(loader.dataset)
+        total_chunks += ds_len
+        print(f"Session: {key:<50} | Valid Chunks: {ds_len}")
+
+        dataset = loader.dataset
+        valid_chunks = len(dataset)
+
+        # Calculate Theoretical Max (Duration / Chunk Size)
+        # Note: Chunk size is stride in your config (sample_stride=chunk_size)
+        duration = dataset.end_time - dataset.start_time
+        # Use screen sampling rate (30Hz) and chunk size (60)
+        stride_sec = (
+            cfg.dataset.modality_config.screen.chunk_size
+            / cfg.dataset.modality_config.screen.sampling_rate
+        )
+        max_chunks = int(duration / stride_sec)
+
+        print(f"Session: {key:<20}")
+        print(f"  > Valid Chunks (Filtered): {valid_chunks}")
+        print(f"  > Theoretical Max (Raw):   {max_chunks}")
+
+        if valid_chunks == max_chunks:
+            print(
+                "  !!! WARNING: Filter might be inactive (Counts match raw duration) !!!"
+            )
+        else:
+            print(f"  > chunks removed by filter: {max_chunks - valid_chunks}")
+
+    print("-" * 40)
+    print(f"TOTAL CHUNKS: {total_chunks}")
+    print(f"EXPECTED BATCHES (bs=8): {total_chunks // 8}")
+    print("=" * 40 + "\n")
+    ############## DEBUGGING ENDS HERE
 
     # Calculate statistics for the NEW readout
     mean_activity_dict = {}
@@ -523,11 +584,11 @@ if __name__ == "__main__":
     dataloaders = {}
     dataloaders["train"] = train_dl
 
-    # Filter logic
-    cfg.dataset.modality_config.treadmill.filters.custom_interval_filter = {
-        "__key__": "session_specific_id_filter",
-        "session_ids": experiment_transfer_test,
-    }
+    # # Filter logic
+    # cfg.dataset.modality_config.responses.filters.custom_interval_filter = {
+    #     "__key__": "session_specific_id_filter",
+    #     "session_ids": experiment_transfer_test,
+    # }
 
     # Creating a separate oracle loader (same data, just for metric calculation)
     start_time = time()

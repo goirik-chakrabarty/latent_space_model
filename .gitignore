@@ -222,3 +222,4 @@ neuralpredictors
 wandb/*
 test_training/*
 slurm_files/*
+*.pth
