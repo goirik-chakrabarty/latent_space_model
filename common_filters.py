@@ -75,7 +75,6 @@ def session_specific_id_filter(session_ids={}, complement=False):
             return []
 
         id_list = sorted(id_list)
-        id_list = [f"{i:05d}" for i in id_list]  # zero-pad IDs to match meta format
 
         meta_path = f"{session_path}/screen/combined_meta.json"
         with open(meta_path, "rb") as f:

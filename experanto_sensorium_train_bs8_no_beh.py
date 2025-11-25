@@ -1,5 +1,6 @@
 seed = 42
 import argparse
+import datetime
 import json
 import os
 import random
@@ -24,6 +25,7 @@ from neuralpredictors.layers.encoders.zero_inflation_encoders import ZIGEncoder
 from neuralpredictors.measures import modules, zero_inflated_losses
 from neuralpredictors.training import early_stopping
 from nnfabrik.utility.nn_helpers import set_random_seed
+from omegaconf import OmegaConf
 from sensorium.datasets.mouse_video_loaders import mouse_video_loader
 from sensorium.models.make_model import make_video_model
 from sensorium.utility import scores
@@ -34,6 +36,7 @@ from tqdm import tqdm
 device = "cuda" if torch.cuda.is_available() else "cpu"
 print(device)
 import common_filters
+from debug import debug_dataset_diagnostics, debug_filter_consistency
 from sensorium.utility.scores import get_correlations
 from tqdm import tqdm
 
@@ -754,11 +757,12 @@ if __name__ == "__main__":
         print("B")
         experiment = session_specific_ids_B
 
-    experiment_test = session_specific_ids_test
+    # Importtant for matching the trial ids correctly in combined_metadata filtering will fail otherwise
+    for k in experiment.keys():
+        experiment[k] = [f"{i:05d}" for i in sorted(experiment[k])]
 
     print("Experiment lengths>>>>>>>>>>>>>>>>>>>>")
     print(len(experiment))
-    print(len(experiment_test))
     # truncate experiments for testing
     experiment = dict(list(experiment.items())[:])
     experiment_test = dict(list(experiment.items())[:])
@@ -769,6 +773,7 @@ if __name__ == "__main__":
         experiment_test[k] = experiment_test[k][4 * n // 6 :]
         print(k, len(experiment[k]), len(experiment_test[k]))
 
+    cfg.dataset.modality_config.screen.valid_condition = {}  # Forces all tiers
     cfg["dataset"]["modality_config"]["responses"]["sampling_rate"] = 30
     cfg["dataset"]["modality_config"]["responses"]["chunk_size"] = 80
 
@@ -810,14 +815,27 @@ if __name__ == "__main__":
     print(f"stride: {cfg['dataset']['modality_config']['screen']['sample_stride']}")
 
     if "with_filter" in experiment_name:
-        cfg.dataset.modality_config.treadmill.filters.custom_interval_filter = {
+        # Filter logic
+        print("Applying Custom Filter...")
+        # Safe assignment preserving nan_filter
+        if not hasattr(cfg.dataset.modality_config.screen, "filters"):
+            cfg.dataset.modality_config.screen.filters = OmegaConf.create({})
+
+        cfg.dataset.modality_config.screen.filters["custom_interval_filter"] = {
             "__key__": "session_specific_id_filter",
             "session_ids": experiment,
         }
+    print("[LOG]", datetime.datetime.now())
     start_time = time()
     train_dl = get_multisession_dataloader(list(experiment.keys()), cfg)
     end_time = time()
     print(f"Dataloader creation time: {end_time - start_time} seconds")
+    print("[LOG]", datetime.datetime.now())
+
+    ############## DEBUGGING: DATASET DIAGNOSTICS
+    debug_filter_consistency(train_dl, experiment)
+    debug_dataset_diagnostics(train_dl, cfg, batch_size=8)
+    # ############## DEBUGGING ENDS HERE
 
     mean_activity_dict = {}
     n_neurons_dict = {}
@@ -897,21 +915,38 @@ if __name__ == "__main__":
     dataloaders = {}
     dataloaders["train"] = train_dl
 
+    # Filter logic
     if "with_filter" in experiment_name:
-        cfg.dataset.modality_config.treadmill.filters.custom_interval_filter = {
+        # Safe assignment preserving nan_filter
+        if not hasattr(cfg.dataset.modality_config.screen, "filters"):
+            cfg.dataset.modality_config.screen.filters = OmegaConf.create({})
+
+        cfg.dataset.modality_config.screen.filters["custom_interval_filter"] = {
             "__key__": "session_specific_id_filter",
             "session_ids": experiment_test,
         }
-    start_time = time()
 
+    print("[LOG]", datetime.datetime.now())
+    start_time = time()
     dataloaders["oracle"] = {}
-    for m in experiment_test.keys():
+    for i, m in enumerate(tqdm(experiment_test.keys())):
         dataloaders["oracle"][m.split("dynamic")[-1].split("-Video")[0]] = (
             get_multisession_dataloader([m], cfg)
         )
+        if i % 10 == 0:
+            ############## DEBUGGING: DATASET DIAGNOSTICS
+            debug_filter_consistency(
+                get_multisession_dataloader([m], cfg), experiment_test
+            )
+            debug_dataset_diagnostics(
+                get_multisession_dataloader([m], cfg), cfg, batch_size=8
+            )
+            # ############## DEBUGGING ENDS HERE
 
     end_time = time()
     print(f"Dataloader creation time: {end_time - start_time} seconds")
+    print("[LOG]", datetime.datetime.now())
+
     # todo - undo it after the validation set labels are updated
     # dataloaders["oracle"] = val_dl
     # dataloaders["oracle"] = {}

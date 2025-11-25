@@ -43,7 +43,7 @@ def debug_filter_consistency(dataloader, allowed_session_ids_map):
             print(f"  Skipping verification for this session.")
             continue
 
-        allowed_ids_set = set(allowed_ids)
+        allowed_ids_set = set(str(x) for x in allowed_ids)
         print(f"  Path: {dataset_path}")
         print(f"  Allowed IDs Count: {len(allowed_ids_set)}")
 
@@ -132,3 +132,75 @@ def debug_filter_consistency(dataloader, allowed_session_ids_map):
 # --- Usage Example ---
 # Place this right after you create your dataloader:
 # debug_filter_consistency(train_dl, experiment_transfer)
+
+
+def debug_dataset_diagnostics(dataloader, cfg, batch_size=8):
+    """
+    Prints diagnostic information about the dataset, including filter configuration,
+    valid conditions, and chunk counts vs theoretical maximums.
+
+    Args:
+        dataloader: The LongCycler or dict of dataloaders.
+        cfg: The configuration object (OmegaConf or dict).
+        batch_size: Batch size used for calculating expected batches (default: 8).
+    """
+    print("\n" + "=" * 40)
+    print(" DEBUG: DATASET DIAGNOSTICS")
+    print("=" * 40)
+
+    # 1. Check the active Valid Condition
+    # Access safely in case cfg structure varies slightly
+    screen_config = cfg.dataset.modality_config.screen
+    valid_condition = (
+        screen_config.get("valid_condition", "Not Set")
+        if hasattr(screen_config, "get")
+        else getattr(screen_config, "valid_condition", "Not Set")
+    )
+
+    print(f"Active Valid Condition: {valid_condition}")
+
+    # Check if filters are configured on the Screen modality
+    has_filters = hasattr(cfg.dataset.modality_config.screen, "filters")
+    print(f"Filter Configured: {has_filters}")
+
+    # 2. Check individual session lengths
+    loaders = dataloader.loaders if hasattr(dataloader, "loaders") else dataloader
+    total_chunks = 0
+
+    for key, loader in loaders.items():
+        ds_len = len(loader.dataset)
+        total_chunks += ds_len
+        print(f"Session: {key:<50} | Valid Chunks: {ds_len}")
+
+        dataset = loader.dataset
+        valid_chunks = len(dataset)
+
+        # Calculate Theoretical Max (Duration / Chunk Size)
+        duration = dataset.end_time - dataset.start_time
+
+        # Use screen sampling rate and chunk size from config
+        screen_cfg = cfg.dataset.modality_config.screen
+        stride_sec = screen_cfg.chunk_size / screen_cfg.sampling_rate
+
+        max_chunks = int(duration / stride_sec)
+
+        print(f"Session: {key:<20}")
+        print(f"  > Valid Chunks (Filtered): {valid_chunks}")
+        print(f"  > Theoretical Max (Raw):   {max_chunks}")
+
+        if valid_chunks == max_chunks:
+            print(
+                "  !!! WARNING: Filter might be inactive (Counts match raw duration) !!!"
+            )
+        else:
+            print(f"  > chunks removed by filter: {max_chunks - valid_chunks}")
+
+    print("-" * 40)
+    print(f"TOTAL CHUNKS: {total_chunks}")
+
+    # Try to grab batch size from config if not provided explicitly, or use default
+    if hasattr(cfg, "dataloader") and "batch_size" in cfg.dataloader:
+        batch_size = cfg.dataloader.batch_size
+
+    print(f"EXPECTED BATCHES (bs={batch_size}): {total_chunks // batch_size}")
+    print("=" * 40 + "\n")
