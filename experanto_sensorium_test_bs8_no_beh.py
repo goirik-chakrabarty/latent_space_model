@@ -284,9 +284,9 @@ def standard_trainer(
             if validation_correlation > best_validation_correlation:
                 best_validation_correlation = validation_correlation
                 # Save best readout
-                torch.save(
-                    model.state_dict(), f"{checkpoint_save_path}best_transfer.pth"
-                )
+                # torch.save(
+                #     model.state_dict(), f"{checkpoint_save_path}best_transfer.pth"
+                # )
 
             val_loss, _ = full_objective(
                 model,
