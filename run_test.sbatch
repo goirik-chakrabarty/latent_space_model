@@ -41,4 +41,4 @@ python -m torch.utils.collect_env
 # python experanto_sensorium_test_bs8_no_beh.py --experiment_name common_with_filter --model_path test_training/sensorium_model_common_with_filter/best.pth
 # python experanto_sensorium_test_bs8_no_beh.py --experiment_name unique_with_filter --model_path test_training/sensorium_model_unique_with_filter/best.pth
 # python experanto_sensorium_test_bs8_no_beh.py --experiment_name common_no_filter --model_path test_training/sensorium_model_common_no_filter/best.pth
-# python experanto_sensorium_test_bs8_no_beh.py --experiment_name unique_no_filter --model_path test_training/sensorium_model_unique_no_filter/best.pth
+python experanto_sensorium_test_bs8_no_beh.py --experiment_name unique_no_filter --model_path test_training/sensorium_model_unique_no_filter/best.pth
