@@ -36,19 +36,7 @@ def model_predictions(
 
     for _, batch in dataloader:
 
-        beh = torch.cat(
-            [
-                batch["eye_tracker"][:, :, :2].transpose(2, 1),
-                batch["treadmill"][:, :, :2].transpose(2, 1),
-            ],
-            axis=1,
-        )
         video = batch["screen"]
-        b_expanded = beh.unsqueeze(-1).unsqueeze(-1)  # or b[:, :, :, None, None]
-        # Now broadcast b to match the spatial dimensions [16, 3, 60, 144, 256]
-        beh_tiled = b_expanded.expand(-1, -1, -1, video.shape[3], video.shape[4])
-        # Concatenate along dim=1 to get [16, 4, 60, 144, 256]
-
         responses = batch["responses"].transpose(2, 1)
         with torch.no_grad():
             resp = responses.detach().cpu()[:, :, skip:]
@@ -56,6 +44,15 @@ def model_predictions(
             with device_state(model, device):
                 responses = responses.to(device)
                 if behavioral_modulation:
+                    beh = torch.cat(
+                        [
+                            batch["eye_tracker"][:, :, :2].transpose(2, 1),
+                            batch["treadmill"][:, :, :2].transpose(2, 1),
+                        ],
+                        axis=1,
+                    )
+                    b_expanded = beh.unsqueeze(-1).unsqueeze(-1)
+                    beh_tiled = b_expanded.expand(-1, -1, -1, video.shape[3], video.shape[4])
                     video = torch.cat([video, beh_tiled], dim=1).to(device)
                     batch_kwargs = {
                         "videos": video,
